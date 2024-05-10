@@ -4,6 +4,9 @@
 #include <AsyncTCP.h>
 #include "ESPAsyncWebServer.h"
 
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
 const char* ssid = "gitwheel";
 const char* password = "password";
 
@@ -21,6 +24,17 @@ const char index_html[] PROGMEM = R"rawliteral(
       display: inline-block; 
       margin: 0px auto; 
       text-align: center;
+      height:100%;
+      width:100%;
+    }
+    table {
+        width:100%;
+    }
+    td {
+        width:50%;
+    }
+    .vertical {
+        transform: rotate(270deg);
     }
     .button {
       background-color: #4CAF50; 
@@ -34,17 +48,127 @@ const char index_html[] PROGMEM = R"rawliteral(
       cursor: pointer;
     }
   </style>
+  <script>
+    
+var gateway = `ws://${window.location.hostname}/ws`;
+var websocket;
+
+window.addEventListener('load', onload);
+
+function onload(event) {
+    initWebSocket();
+}
+
+function getBattery(){
+    websocket.send("B?");
+}
+
+function sendHorizontal(e)
+{
+    var val = e.value;
+
+    if (e.value > 45 && e.value < 55)
+    {
+      val = 50;
+    }
+
+    var vv = "H=" + val;
+    console.log("Horizontal: " + vv);
+    websocket.send(vv);
+}
+function sendVertical(e)
+{
+    var val = e.value;
+
+    if (e.value > -10 && e.value < 10)
+    {
+      val = 50;
+    }
+
+    var vv = "V=" + val;
+    console.log("Vertical: " + vv);
+
+    websocket.send(vv);
+}
+
+function initWebSocket() {
+    console.log('Trying to open a WebSocket connection…');
+    websocket = new WebSocket(gateway);
+    websocket.onopen = onOpen;
+    websocket.onclose = onClose;
+    websocket.onmessage = onMessage;
+}
+
+function onOpen(event) {
+    console.log('Connection opened');
+    getBattery();
+}
+
+function onClose(event) {
+    console.log('Connection closed');
+    setTimeout(initWebSocket, 2000);
+}
+
+function onMessage(event) {
+    console.log(event.data);
+    if (event.data.startsWith("B="))
+    {
+        document.getElementById('bat-viewer').innerHTML = event.data;
+    }
+}
+</script>
 <body>
   <h1>gitwheel</h1>
-  <p><a href="/przod"><button class="button">PRZOD</button></a></p>
-  <p><a href="/tyl"><button class="button">TYL</button></a></p>
-  <p><a href="/stop"><button class="button">STOP</button></a></p>
+  <table>
+  <tr>
+  <td>
+    <input id="horiz" type="range" min="0" max="100" value="50" oninput="sendHorizontal(this)"/>
+  </td>
+  <td>
+    <input id="vertical" type="range" class="vertical" min="-255" max="255" value="0" oninput="sendVertical(this)"/>
+  </td>
+  </tr>
 </body>
 </html>
 
 )rawliteral";
 
-AsyncWebServer server(80);
+void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
+  AwsFrameInfo *info = (AwsFrameInfo*)arg;
+  if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+    data[len] = 0;
+    String message = (char*)data;
+    if (message.startsWith("V=")) {
+      int v = message.substring(2).toInt();
+      if (v == 0)
+      {
+        analogWrite(MOTOR_BACKWARD, 0);
+        analogWrite(MOTOR_FORWARD, 0);
+      }
+      else if (v > 0)
+      {
+        analogWrite(MOTOR_BACKWARD, 0);
+        analogWrite(MOTOR_FORWARD, v);
+      }
+      else
+      {
+        analogWrite(MOTOR_FORWARD, 0);
+        analogWrite(MOTOR_BACKWARD, -v);
+      }
+    }
+  }
+}
+
+void onWebsocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  switch (type) {
+    case WS_EVT_DATA:
+      handleWebSocketMessage(arg, data, len);
+      break;
+    default:
+      break;
+  }
+}
+
 void setup() {
   WiFi.softAP(ssid, password);
 
@@ -55,8 +179,12 @@ void setup() {
     request->send(200, "text/html", index_html);
   });
 
+  ws.onEvent(onWebsocketEvent);
+  server.addHandler(&ws);
+
   server.begin();
 }
 
 void loop() {
+  ws.cleanupClients();
 }
