@@ -4,6 +4,9 @@
 #include <AsyncTCP.h>
 #include "ESPAsyncWebServer.h"
 
+#include <ESP32Servo.h>
+Servo servo;
+
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
@@ -12,6 +15,7 @@ const char* password = "password";
 
 #define MOTOR_FORWARD 3
 #define MOTOR_BACKWARD 2
+#define SERVO 20
 
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -56,6 +60,7 @@ var websocket;
 window.addEventListener('load', onload);
 
 function onload(event) {
+    document.querySelector("body").requestFullscreen();
     initWebSocket();
 }
 
@@ -122,7 +127,7 @@ function onMessage(event) {
   <table>
   <tr>
   <td>
-    <input id="horiz" type="range" min="0" max="100" value="50" oninput="sendHorizontal(this)"/>
+    <input id="horiz" type="range" min="45" max="135" value="90" oninput="sendHorizontal(this)"/>
   </td>
   <td>
     <input id="vertical" type="range" class="vertical" min="-255" max="255" value="0" oninput="sendVertical(this)"/>
@@ -155,6 +160,10 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
         analogWrite(MOTOR_FORWARD, 0);
         analogWrite(MOTOR_BACKWARD, -v);
       }
+    } else if (message.startsWith("H="))
+    {
+      int h = message.substring(2).toInt();
+      servo.write(h);
     }
   }
 }
@@ -174,6 +183,7 @@ void setup() {
 
   pinMode(MOTOR_BACKWARD, OUTPUT);
   pinMode(MOTOR_FORWARD, OUTPUT);
+  servo.attach(SERVO);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/html", index_html);
